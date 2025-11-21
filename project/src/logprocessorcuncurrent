@@ -1,0 +1,65 @@
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.*;
+import java.util.concurrent.*;
+
+public class LogProcessorConcurrent {
+
+    public static void main(String[] args) throws Exception {
+
+        String folder = "logs";  // folder path
+        String[] keywords = {"ERROR", "WARN", "INFO"}; // keywords to count
+
+        Path dir = Paths.get(folder);
+        List<Path> files = Files.list(dir)
+                                .filter(Files::isRegularFile)
+                                .toList();
+
+        int THREAD_COUNT = 4; // can be tuned
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+
+        ConcurrentHashMap<String, Integer> finalMap = new ConcurrentHashMap<>();
+
+        long start = System.currentTimeMillis();
+
+        List<Future<Map<String, Integer>>> futures = new ArrayList<>();
+
+        for (Path file : files) {
+            futures.add(executor.submit(new LogWorker(file, keywords)));
+        }
+
+        for (Future<Map<String, Integer>> future : futures) {
+            Map<String, Integer> localMap = future.get();
+            localMap.forEach((key, val) ->
+                finalMap.merge(key, val, Integer::sum)
+            );
+        }
+
+        long end = System.currentTimeMillis();
+        executor.shutdown();
+
+        System.out.println("===== CONCURRENT SUMMARY =====");
+        finalMap.forEach((k, v) -> 
+            System.out.println(k + " → " + v)
+        );
+
+        System.out.println("Execution Time (Concurrent): " 
+                            + (end - start) + " ms");
+
+        writeResultToFile(finalMap, "result_concurrent.txt");
+    }
+
+    private static void writeResultToFile(Map<String, Integer> map,
+                                          String filename) {
+        try (FileWriter fw = new FileWriter(filename)) {
+            map.forEach((k, v) -> {
+                try {
+                    fw.write(k + ": " + v + "\n");
+                } catch (IOException ignored) {}
+            });
+        } catch (IOException e) {
+            System.err.println("Error writing to file.");
+        }
+    }
+}
